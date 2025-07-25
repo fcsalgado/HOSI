@@ -8,7 +8,7 @@ The HOSI system can take panoramic hyperspectral images that meet the difficult 
 
 This system's adaptability, cost-effectiveness, and open-source nature position it as a valuable tool for researchers investigating the complex relationships between light, environment, behaviour, ecology, and biodiversity, with further potential uses in many other fields.
 
-# Publicaiton:
+# Publication:
 For further information, including detailed performance data, see my paper:
 
 **Troscianko, J.** A hyperspectral open-source imager (HOSI). _BMC Biol_ 23, 5 (2025). https://doi.org/10.1186/s12915-024-02110-w
