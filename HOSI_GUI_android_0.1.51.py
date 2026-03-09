@@ -126,8 +126,7 @@ def connect():
 		#serialName = '/dev/ttyUSB0'
 		if(len(com_list) > 0):
 			# ~ serialName = com_list[0]
-			# serialName = com_list[len(com_list)-1]
-			serialName = "COM10"
+			serialName = com_list[len(com_list)-1]
 			ser = serial.Serial(serialName, 115200) #115200 230400
 		else:
 			serialName = 0
@@ -478,173 +477,161 @@ def getSpec():
 			statusLabel.config(text="Invalid pan/tilt")
 			return
 
-##	specLength = math.ceil(pixels/int(boxcar.get()))
-		
-	serFlag = 0
-
 	if(fileImportFlag == 1 and loadLine == 0):
-##		print("loading spec")
-		f=open(loadPath)
-		lines=f.readlines()
+		f = open(loadPath)
+		lines = f.readlines()
 
-	while (serFlag == 0 or fileImportFlag == 1):
-		if(stopFlag == 1):
-			output = "x"
-			dataString += output
+	# Schedule non-blocking poll instead of blocking while loop
+	root.after(1, pollSpec)
+
+
+def pollSpec():
+	## Non-blocking replacement for the blocking while loop in getSpec.
+	## Called repeatedly via root.after() so the GUI stays responsive on Android.
+	global tt, unitNumber, imLum, imR, imG, imB, imCol, imSatR, imSatB, panStart, panStop, pan_Res, panDim, tiltDim, tiltStart, tiltStop, tilt_Res, tiltRes, scanningFlag, dataString, boxcarN, maxRGB, output, focusPos
+	global imI, imU, imGG, imChlA, imChlB, imNDVI, maxIGU, hspec, hspecPan, hspecTilt, fileImportFlag, loadPath, loadLine, lines, selX, selY, wavelengthBoxcar, stopFlag, ct
+
+	if(stopFlag == 1):
+		output = "x"
+		dataString += output
+	else:
+		if(fileImportFlag == 0):
+			try:
+				if platform == 'and':
+					output = ser.readline()
+				else:
+					if ser.in_waiting > 0:
+						output = ser.readline()
+					else:
+						root.after(10, pollSpec) # nothing waiting yet, check again soon
+						return
+				output = output.decode('utf-8', 'replace')
+				dataString += output
+			except Exception as e:
+				output = "0"
+				print("Error reading line: " + str(e))
+				root.after(20, pollSpec)
+				return
 		else:
-			if(fileImportFlag == 0):
-				output = ser.readline()
-				try:
-					output = output.decode('utf-8', 'replace')
-					dataString += output
-				except:
-					output = "0"
-					print("Error reading line")
+			if loadLine >= len(lines):
+				output = "x" # end of file
 			else:
 				output = lines[loadLine]
-	##			print(output)
-	##			print(loadLine)
-				loadLine +=1
-			
-			### load file & read first line
+				loadLine += 1
 
-		if(output.startswith('x')):
-##			print("a")
-			statusLabel.config(text="Done")
-			## loop to add hspec le values
-			hspec = np.nan_to_num(hspec)# convert NaNs to zeros
-			if(fileImportFlag == 0):
-##				print("b")
-				dataString2 = "le values\npan,tilt,wavelength\n,"
-				for i in range(0, len(wavelengthBoxcar)):
-					dataString2 += "," + str(int(wavelengthBoxcar[i]))
-##				print("c") ## FAILS after this point... WHY!?
-##				dataString2 += str(hspec)
-				for i in range(0, len(hspecTilt)):
-					for j in range(0, len(hspecPan)):
-						dataString2 += '\n' + str(hspecPan[j]) + ',' + str(hspecTilt[i]) + ','
-						dataString3 = str(hspec[i, j])
-##						dataString3 = dataString3.replace('\n', ',')
-						dataString3 = dataString3.replace(' ', ',')
-						dataString3 = dataString3.replace('[', '')
-						dataString3 = dataString3.replace(']', '')
-						dataString3 = dataString3.replace('0.000e+00', '0')
+	if(output.startswith('x')):
+		statusLabel.config(text="Done")
+		hspec = np.nan_to_num(hspec) # convert NaNs to zeros
+		if(fileImportFlag == 0):
+			dataString2 = "le values\npan,tilt,wavelength\n,"
+			for i in range(0, len(wavelengthBoxcar)):
+				dataString2 += "," + str(int(wavelengthBoxcar[i]))
+			for i in range(0, len(hspecTilt)):
+				for j in range(0, len(hspecPan)):
+					dataString2 += '\n' + str(hspecPan[j]) + ',' + str(hspecTilt[i]) + ','
+					dataString3 = str(hspec[i, j])
+					dataString3 = dataString3.replace(' ', ',')
+					dataString3 = dataString3.replace('[', '')
+					dataString3 = dataString3.replace(']', '')
+					dataString3 = dataString3.replace('0.000e+00', '0')
+					dataString2 += dataString3
 
-						dataString2 += dataString3
+		#-------save output file--------
+		if(fileImportFlag == 0):
+			ts = saveLabel.get()
+			t = time.localtime()
+			if not os.path.exists("./scans"):
+				os.makedirs("./scans")
+				print("Created scans folder")
+			ct = "./scans/" + str(t.tm_year) + "-" + str(t.tm_mon) + "-" + str(t.tm_mday) + "_" + time.strftime("%H-%M-%S", t) + "_" + ts
+			ctt = ct + ".csv"
+			file_object = open(ctt, 'a')
+			file_object.write(dataString)
+			file_object.write(dataString2)
+			file_object.close()
+			statusLabel.config(text="Ready")
+			plotGraph("")
+			ctf = ct + "_sRGB.png"
+			#save image
+			nImR = ((imR/maxRGB)**0.42) * 255
+			nImG = ((imG/maxRGB)**0.42) * 255
+			nImB = ((imB/maxRGB)**0.42) * 255
+			imCol = np.dstack((nImR, nImG, nImB))
+			tImCol = imCol.astype(np.uint8)
+			img = Image.fromarray(tImCol, "RGB")
+			img.save(ctf)
 
-##			print("d")
-			#-------save output file--------
-			if(fileImportFlag == 0):
-				ts = saveLabel.get()
-				t = time.localtime()
-				if not os.path.exists("./scans"):
-					os.makedirs("./scans")
-					print("Created scans folder")
-				ct = "./scans/" + str(t.tm_year) + "-" + str(t.tm_mon) + "-" + str(t.tm_mday) + "_" + time.strftime("%H-%M-%S", t) + "_" + ts
-				ctt = ct + ".csv"
-##				print("e")
-				file_object = open(ctt, 'a')
-				file_object.write(dataString)
-				file_object.write(dataString2)
-				file_object.close()
-##				print("f")
-				statusLabel.config(text="Ready")
-				plotGraph("")
-				ctf = ct + "_sRGB.png"
-	##            plt.imsave(ctf, imCol)
+		dataString = ""
+		scanningFlag = 0
+		btStart["text"] = "Start"
+		btStart["state"] = "active"
+		btLoad["state"] = "active"
+		focusPos = 0
+		loadLine = 0
+		selX = -1
+		selY = -1
+		stopFlag = 0
+		print("h - done")
+		return  # scan finished - do NOT reschedule
 
-				#save image
-				nImR = ((imR/maxRGB)**0.42) * 255
-				nImG = ((imG/maxRGB)**0.42) * 255
-				nImB = ((imB/maxRGB)**0.42) * 255
-				imCol = np.dstack((nImR, nImG, nImB))
-				
-				tImCol = imCol.astype(np.uint8)
-				img = Image.fromarray(tImCol, "RGB")
-				#img.show()
-				img.save(ctf)
-##				print("g")
-			
-			dataString = ""
-			scanningFlag = 0
-			btStart["text"] = "Start"
-			btStart["state"] = "active"
-			btLoad["state"] = "active"
-			focusPos = 0 # reset focus position in case it was previously up
-			#statusLabel.config(text="Ready")
-			serFlag = 1
-			#fileImportFlag = 0
-			loadLine = 0
-			selX = -1
-			selY = -1 # reset these values to clear reflectance too
-			stopFlag = 0
-			print("h - done")
-			return
-		#output = output.decode('utf-8')
-		output = output.split(',')
-##		specLength = math.ceil(pixels/boxcarN)
-		if(output[0] == 'h'):
-			unitNumber = int(output[1])
-			#print("unit: " + str(unitNumber))
-			
-			panStart = int(output[2])
-			panFrom.set(str(panStart))
-			panStop = int(output[3])
-			panTo.set(str(panStop))
-			pan_Res = int(output[4])
-			panResolution.set(str(pan_Res))
-			panDim = int(0)
-			
-			boxcarN = int(output[9])
-			boxcarVal.set(str(boxcarN))
-			specLength = math.ceil(pixels/boxcarN)
-##			specLength = math.ceil(pixels/boxcarN)
-			if(reflFlag == 1):
-				clearRefl()
-			unitSetup()
+	output = output.split(',')
+	if(output[0] == 'h'):
+		unitNumber = int(output[1])
 
-			tiltStart = int(output[5])
-			tiltFrom.set(str(tiltStart))
-			tiltStop = int(output[6])
-			tiltTo.set(str(tiltStop))			
-			tilt_Res = int(output[7])
-			
-			tiltResolution.set(str(tilt_Res))
-			panDim = int(1+(panStop-panStart)/pan_Res)
-			tiltDim = int(1+(tiltStop-tiltStart)/tilt_Res)
-			print("Hyperspec " + str(panDim) + " by " + str(tiltDim))
-			imLum = np.zeros([tiltDim, panDim])
-			imR = np.zeros([tiltDim, panDim])
-			imG = np.zeros([tiltDim, panDim])            
-			imB = np.zeros([tiltDim, panDim])
-			imCol = np.zeros([tiltDim, panDim, 3])
-			imSatR = np.zeros([tiltDim, panDim])
-			imSatB = np.zeros([tiltDim, panDim])
+		panStart = int(output[2])
+		panFrom.set(str(panStart))
+		panStop = int(output[3])
+		panTo.set(str(panStop))
+		pan_Res = int(output[4])
+		panResolution.set(str(pan_Res))
+		panDim = int(0)
 
-			imI = np.zeros([tiltDim, panDim])
-			imGG = np.zeros([tiltDim, panDim]) 
-			imU = np.zeros([tiltDim, panDim])
-			
-			imChlA = np.zeros([tiltDim, panDim])            
-			imChlB = np.zeros([tiltDim, panDim])
-			imNDVI = np.zeros([tiltDim, panDim, 3])
-			
-			hspec = np.zeros([tiltDim, panDim, specLength])
-			hspecPan = np.zeros([panDim])
-			hspecTilt = np.zeros([tiltDim])
+		boxcarN = int(output[9])
+		boxcarVal.set(str(boxcarN))
+		specLength = math.ceil(pixels/boxcarN)
+		if(reflFlag == 1):
+			clearRefl()
+		unitSetup()
 
+		tiltStart = int(output[5])
+		tiltFrom.set(str(tiltStart))
+		tiltStop = int(output[6])
+		tiltTo.set(str(tiltStop))
+		tilt_Res = int(output[7])
+		tiltResolution.set(str(tilt_Res))
+		panDim = int(1+(panStop-panStart)/pan_Res)
+		tiltDim = int(1+(tiltStop-tiltStart)/tilt_Res)
+		print("Hyperspec " + str(panDim) + " by " + str(tiltDim))
+		imLum = np.zeros([tiltDim, panDim])
+		imR = np.zeros([tiltDim, panDim])
+		imG = np.zeros([tiltDim, panDim])
+		imB = np.zeros([tiltDim, panDim])
+		imCol = np.zeros([tiltDim, panDim, 3])
+		imSatR = np.zeros([tiltDim, panDim])
+		imSatB = np.zeros([tiltDim, panDim])
+		imI = np.zeros([tiltDim, panDim])
+		imGG = np.zeros([tiltDim, panDim])
+		imU = np.zeros([tiltDim, panDim])
+		imChlA = np.zeros([tiltDim, panDim])
+		imChlB = np.zeros([tiltDim, panDim])
+		imNDVI = np.zeros([tiltDim, panDim, 3])
+		hspec = np.zeros([tiltDim, panDim, specLength])
+		hspecPan = np.zeros([panDim])
+		hspecTilt = np.zeros([tiltDim])
 
-		if(len(output) == hspec.shape[2]+5):
-			if(int(output[2]) == 0 or int(output[2]) == 1 or int(output[2]) == 2 ):
-				#time.sleep(0.01)
-				#processSpec()
-				if(preview > 0): ## live update
-						root.after(1, processSpec) # 10 seems to work
-				else:
-						processSpec()
-				#statusLabel.config(text="Running")
+	if(len(output) == hspec.shape[2]+5):
+		if(int(output[2]) == 0 or int(output[2]) == 1 or int(output[2]) == 2):
+			if(preview > 0): ## live update
+				root.after(1, processSpec) # processSpec will reschedule pollSpec
 				return
-		
+			else:
+				processSpec()
+
+	root.after(1, pollSpec) # keep polling for next line
+
+
+
+
 
 def processSpec():
 	global tt, darkTimes, darkVals, panStart, panStop, pan_Res, panDim, tiltDim, tiltStart, tiltStop, tilt_Res, tiltRes, linCoefs,  wavelength, wavelengthBins, maxRGB, boxcarN, output, maxIGU, hspec
@@ -780,10 +767,8 @@ def processSpec():
 					plotGraph("")
 					#root.after(1, plotGraph(ts))
 
-	if updateDuringDark == 1:
-		root.after(1, getSpec)
-	else:
-		getSpec()
+	# Always reschedule pollSpec non-blocking (was: getSpec() which could block)
+	root.after(1, pollSpec)
 		
 
 
@@ -810,102 +795,69 @@ def togglePreview():
 		
 
 
+def _waitSerial(expected_prefix, callback, timeout_ms=10000, _elapsed=0):
+	## Non-blocking serial wait helper. Checks for a response prefix and
+	## calls callback() when found, or gives up after timeout_ms.
+	try:
+		if platform == 'and':
+			line = ser.readline()
+		else:
+			line = ser.readline() if ser.in_waiting > 0 else b''
+		if line.startswith(expected_prefix):
+			callback()
+			return
+	except:
+		pass
+	if _elapsed >= timeout_ms:
+		callback() # give up waiting and re-enable button anyway
+		return
+	root.after(20, lambda: _waitSerial(expected_prefix, callback, timeout_ms, _elapsed+20))
+
+
 def goTL():
 	if(scanningFlag == 0):
 		btTL["state"] = "disabled"
-		ts = "l" + tiltTop.get()
-		ser.write(str.encode( ts ))
-		serFlag = 0
-		while serFlag == 0: # wait for tilt to get to where it's going
-			output = ser.readline()
-			if(output.startswith(b't')):
-				serFlag = 1
-		time.sleep(0.1)
-		ts = "p" + panLeft.get()
-		ser.write(str.encode( ts ))
-		serFlag = 0
-		while serFlag == 0: # wait for pan to get to where it's going
-			output = ser.readline()
-			if(output.startswith(b'p')):
-				serFlag = 1
-		btTL["state"] = "active"
+		ser.write(str.encode("l" + tiltTop.get()))
+		def _step2():
+			ser.write(str.encode("p" + panLeft.get()))
+			_waitSerial(b'p', lambda: btTL.config(state="active"))
+		_waitSerial(b't', _step2)
 
 def goTR():
 	if(scanningFlag == 0):
 		btTR["state"] = "disabled"
-		ts = "l" + tiltTop.get()
-		ser.write(str.encode( ts ))
-		serFlag = 0
-		while serFlag == 0: # wait for tilt to get to where it's going
-			output = ser.readline()
-			if(output.startswith(b't')):
-				serFlag = 1
-		time.sleep(0.1)
-		ts = "p" + panRight.get()
-		ser.write(str.encode( ts ))
-		serFlag = 0
-		while serFlag == 0: # wait for pan to get to where it's going
-			output = ser.readline()
-			if(output.startswith(b'p')):
-				serFlag = 1
-		btTR["state"] = "active"
+		ser.write(str.encode("l" + tiltTop.get()))
+		def _step2():
+			ser.write(str.encode("p" + panRight.get()))
+			_waitSerial(b'p', lambda: btTR.config(state="active"))
+		_waitSerial(b't', _step2)
 
 def goBL():
 	if(scanningFlag == 0):
 		btBL["state"] = "disabled"
-		ts = "l" + tiltBot.get()
-		ser.write(str.encode( ts ))
-		serFlag = 0
-		while serFlag == 0: # wait for tilt to get to where it's going
-			output = ser.readline()
-			if(output.startswith(b't')):
-				serFlag = 1
-		time.sleep(0.1)
-		ts = "p" + panLeft.get()
-		ser.write(str.encode( ts ))
-		serFlag = 0
-		while serFlag == 0: # wait for pan to get to where it's going
-			output = ser.readline()
-			if(output.startswith(b'p')):
-				serFlag = 1
-		btBL["state"] = "active"
+		ser.write(str.encode("l" + tiltBot.get()))
+		def _step2():
+			ser.write(str.encode("p" + panLeft.get()))
+			_waitSerial(b'p', lambda: btBL.config(state="active"))
+		_waitSerial(b't', _step2)
 
 def goBR():
 	if(scanningFlag == 0):
 		btBR["state"] = "disabled"
-		ts = "l" + tiltBot.get()
-		ser.write(str.encode( ts ))
-		serFlag = 0
-		while serFlag == 0: # wait for tilt to get to where it's going
-			output = ser.readline()
-			if(output.startswith(b't')):
-				serFlag = 1
-		time.sleep(0.1)
-		ts = "p" + panRight.get()
-		ser.write(str.encode( ts ))
-		serFlag = 0
-		while serFlag == 0: # wait for pan to get to where it's going
-			output = ser.readline()
-			if(output.startswith(b'p')):
-				serFlag = 1
-		btBR["state"] = "active"
-	
+		ser.write(str.encode("l" + tiltBot.get()))
+		def _step2():
+			ser.write(str.encode("p" + panRight.get()))
+			_waitSerial(b'p', lambda: btBR.config(state="active"))
+		_waitSerial(b't', _step2)
+
 def goZero():
 	if(scanningFlag == 0):
 		btZero["state"] = "disabled"
-		ser.write(str.encode( "l0" ))
-		serFlag = 0
-		while serFlag == 0: # wait for tilt to get to where it's going
-			output = ser.readline()
-			if(output.startswith(b't')):
-				serFlag = 1
-		ser.write(str.encode( "p0" ))
-		serFlag = 0
-		while serFlag == 0: # wait for pan to get to where it's going
-			output = ser.readline()
-			if(output.startswith(b'p')):
-				serFlag = 1
-		btZero["state"] = "active"
+		ser.write(str.encode("l0"))
+		def _step2():
+			ser.write(str.encode("p0"))
+			_waitSerial(b'p', lambda: btZero.config(state="active"))
+		_waitSerial(b't', _step2)
 
 def showRes(a,b,c):
 	if(scanningFlag == 0):
